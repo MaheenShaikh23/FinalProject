@@ -65,31 +65,67 @@ st.success(f"{final_pred:,.2f} kg")
 with st.expander("View Input Data"):
     st.write(input_df)
 
-# Display MAE, MSE, and R² metrics
-y_test = np.array([0])  # Assuming you don't have actual data for this example
-y_pred_stacked = np.array([final_pred])
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-mae = np.abs(y_test - y_pred_stacked).mean()  # Calculate MAE
-mse = ((y_test - y_pred_stacked) ** 2).mean()  # Calculate MSE
-r2 = 1 - (np.sum((y_test - y_pred_stacked) ** 2) / np.sum((y_test - y_pred_stacked.mean()) ** 2))  # Calculate R²
+# Load test data to evaluate model (you'll need to import this function)
+from utils.data_preprocessing import load_and_split_data
+_, X_test, _, y_test = load_and_split_data()
 
-# Feature importance plots (Optional: remove if not needed)
-st.subheader("🔍 Feature Importance")
+# Predict using trained base models
+rf_test_pred = rf_model.predict(X_test)
+xgb_test_pred = xgb_model.predict(X_test)
 
-fig, axes = plt.subplots(1, 2, figsize=(16, 6))
-rf_importances = rf_model.feature_importances_
-xgb_importances = xgb_model.feature_importances_
-features = input_df.columns
+# Stack test predictions
+stacked_test = np.column_stack((rf_test_pred, xgb_test_pred))
+stacked_pred = meta_model.predict(stacked_test)
 
-sns.barplot(x=rf_importances, y=features, ax=axes[0])
-axes[0].set_title("Random Forest Feature Importance")
+# Evaluation metrics
+mae = mean_absolute_error(y_test, stacked_pred)
+mse = mean_squared_error(y_test, stacked_pred)
+r2 = r2_score(y_test, stacked_pred)
 
-sns.barplot(x=xgb_importances, y=features, ax=axes[1])
-axes[1].set_title("XGBoost Feature Importance")
+# Sensitivity Analysis: Effect of Each Input on Predicted Waste
+st.subheader("📊 Effect of Each Input on Total Waste")
 
+# Use current user input as baseline
+baseline = input_df.iloc[0].copy()
+
+# Ranges for each feature to test
+ranges = {
+    "population": np.linspace(5000, 1000000, 20),
+    "gdp_per_capita": np.linspace(1000, 50000, 20),
+    "recycling_rate": np.linspace(10, 90, 20),
+    "household_size": np.linspace(1, 10, 20),
+    "industrial_waste": np.linspace(90000, 4500000, 20),
+    "plastic_waste": np.linspace(50, 1000, 20)
+}
+
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+axes = axes.flatten()
+
+for i, (feature, values) in enumerate(ranges.items()):
+    preds = []
+    for val in values:
+        temp_input = baseline.copy()
+        temp_input[feature] = val
+        temp_df = pd.DataFrame([temp_input])
+        
+        rf_pred = rf_model.predict(temp_df)[0]
+        xgb_pred = xgb_model.predict(temp_df)[0]
+        stacked_input = np.column_stack((rf_pred, xgb_pred))
+        final_pred = meta_model.predict(stacked_input)[0]
+        
+        preds.append(final_pred)
+    
+    axes[i].plot(values, preds, marker='o')
+    axes[i].set_title(f"Impact of {feature}")
+    axes[i].set_xlabel(feature)
+    axes[i].set_ylabel("Predicted Total Waste")
+
+plt.tight_layout()
 st.pyplot(fig)
 
-st.subheader("🔍 Model Metrics")
+st.subheader("📏 Model Evaluation Metrics")
 st.write(f"MAE: {mae:.2f}")
 st.write(f"MSE: {mse:.2f}")
 st.write(f"R²: {r2:.2f}")
